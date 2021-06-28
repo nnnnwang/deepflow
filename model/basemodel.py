@@ -3,14 +3,12 @@
 # @Author  : 爱喝可乐的学渣
 # @Email   : wangnannanzju@qq.com
 
-import os
-from abc import abstractmethod
 from collections import Iterable, OrderedDict
 
-from tensorflow.keras import backend as K
-from tensorflow.keras.layers import Concatenate
+from tensorflow.keras.layers import Concatenate,Activation
 
 from common.utils import Utils
+from layers import layer_fn,Mlp
 from input.input_cls import Feature, DenseFeature, SparseFeature, SequenceFeature
 from input.input_fn import build_model_input
 
@@ -172,7 +170,9 @@ class BaseModel:
         self.hyper_parameter[key] = value
         return value
 
-    def add_dense_input(self, dnn_in, dense_feature_cls_lst):
+        # exec (f"self.{key} = value")
+
+    def _add_dense_input(self, dnn_in, dense_feature_cls_lst):
 
         if len(dense_feature_cls_lst) > 0:
             if len(dense_feature_cls_lst) > 1:
@@ -186,3 +186,53 @@ class BaseModel:
                 dnn_in = Concatenate()([dnn_in, dense_out])
 
         return dnn_in
+
+    def _get_sparse_embedding(self, suffix_name=None):
+
+        for attr_name in ('model_name', 'embedding_init_name', 'embedding_init_stddev', 'embedding_l1_reg', 'embedding_l2_reg', 'mask_zero', 'pooling'):
+            self._has_attr(attr_name)
+
+        if suffix_name is None:
+            suffix_name = self.model_name + '_embed'
+
+        return layer_fn.get_embed_output(
+            self.input_dict,
+            sparse_feat_cls_list=self.sparse_feat_cls_list,
+            embedding_init_name=self.embedding_init_name,
+            embedding_init_stddev=self.embedding_init_stddev,
+            embedding_l1_reg=self.embedding_l1_reg,
+            embedding_l2_reg=self.embedding_l2_reg,
+            mask_zero=self.mask_zero,
+            pooling=self.pooling,
+            suffix_name=suffix_name
+        )
+
+    def _get_mlp_out(self, mlp_input):
+        for attr_name in ('hidden_units', 'dropout_list', 'activation', 'deep_l2_reg_list', 'use_bn', 'fc_init'):
+            self._has_attr(attr_name)
+
+        return Mlp(
+            units=self.hidden_units,
+            dropout_list=self.dropout_list,
+            activation=self.activation,
+            l2_reg_list=self.deep_l2_reg_list,
+            use_bn=self.use_bn,
+            kernel_initializer=self.fc_init
+        )(mlp_input)
+
+    def _has_attr(self, attr_name):
+        if not hasattr(self, attr_name):
+            raise ValueError('current object doesn\'t have {} attribute, please check if it has been set'.format(attr_name))
+
+    #TODO add the support for multi-classification
+    def _predict_layer(self, out_logit):
+
+        if  not hasattr(self, 'model_type'):
+            raise ValueError(' you have to set a model_type parameter for current Model, it could be bi-classification or regression')
+
+        if self.model_type == 'bi_classifier':
+            y_hat = Activation('sigmoid')(out_logit)
+        elif self.model_type == 'regression':
+            y_hat = out_logit
+
+        return y_hat

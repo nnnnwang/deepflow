@@ -42,8 +42,18 @@ def get_initializer(init_name='truncate_norm', init_stddev=0.05, seed=1024):
         return glorot_normal(seed=seed)
     elif init_name in ('he_norm', 'he_normal'):
         return he_normal(seed)
-
-
+    elif init_name in ('trucate_uniform'):
+        return TruncatedNormal(stddev=init_stddev)
+    elif init_name in ('glorot_uniform'):
+        return glorot_uniform()
+    elif init_name in ('he_uniform'):
+        return he_uniform()
+    elif init_name in ('zero', 'zeros'):
+        return Zeros()
+    elif init_name in ('ones', 'one'):
+        return Ones()
+    else:
+        raise ValueError('not support {} initializer'.format(init_name))
 def get_regularizer(l1_reg:0.0, l2_reg:0.0):
     if l1_reg is None:
         l1_reg = 0.0

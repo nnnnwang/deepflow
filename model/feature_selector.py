@@ -8,10 +8,8 @@ import numpy as np
 from tensorflow.keras import layers
 from tensorflow.keras import Model
 from tensorflow.keras.callbacks import Callback
-from tensorflow.keras import backend as K
 
-from layers import layer_fn
-from layers import Mlp
+from layers import Variable
 from model.basemodel import BaseModel
 
 class FeatureSelector(BaseModel):
@@ -36,7 +34,7 @@ class FeatureSelector(BaseModel):
         """
         Examples:
 
-            fe = FeatureSelector()
+            fe = FeatureSelector(model_type='regression')
             fe_callback = FeatureImportanceCallback(fe)
             fe.compile("mse", "acc")
             # print feature importance on every epoch
@@ -84,16 +82,7 @@ class FeatureSelector(BaseModel):
         super(FeatureSelector, self).build()
 
         if len(self.sparse_feat_cls_list) > 0:
-            sparse_out = layer_fn.get_embed_output(
-                self.input_dict,
-                sparse_feat_cls_list=self.sparse_feat_cls_list,
-                embedding_init_name=self.embedding_init_name,
-                embedding_init_stddev=self.embedding_init_stddev,
-                embedding_l1_reg=self.embedding_l1_reg,
-                embedding_l2_reg=self.embedding_l2_reg,
-                mask_zero=self.mask_zero,
-                suffix_name='feature_selector'
-            )
+            sparse_out = self._get_sparse_embedding()
         else:
             sparse_out = None
 
@@ -107,7 +96,7 @@ class FeatureSelector(BaseModel):
 
         feature_len = len(self.dense_feat_cls_list) + len(self.sparse_feat_cls_list)
 
-        feature_importance = layers.Activation('sigmoid')(Variable(feature_len, name='feature_importance')(sparse_out if sparse_out is not None else dense_out))
+        feature_importance = layers.Activation('sigmoid')(Variable((feature_len, 1), 'zeros', True, name='feature_importance')(sparse_out if sparse_out is not None else dense_out))
 
         if dense_out is None:
             sparse_gate = feature_importance
@@ -121,20 +110,10 @@ class FeatureSelector(BaseModel):
             dense_out = tf.multiply(dense_out, dense_gate)
             dnn_in = layers.Concatenate()([sparse_out, dense_out])
 
-        deep_dnn_out = Mlp(
-            units=self.hidden_units,
-            dropout_list=self.dropout_list,
-            activation=self.activation,
-            l2_reg_list=self.deep_l2_reg_list,
-            use_bn=self.use_bn,
-            kernel_initializer=self.fc_init
-        )(dnn_in)
+        deep_dnn_out = self._get_mlp_out(dnn_in)
 
         dnn_logit = layers.Dense(1, name='dense')(deep_dnn_out)
-        if self.model_type == 'bi_classifier':
-            y_hat = layers.Activation('sigmoid')(dnn_logit)
-        elif self.model_type == 'regression':
-            y_hat = dnn_logit
+        y_hat = self._predict_layer(dnn_logit)
 
         self.model = Model(inputs=self.input_dict, outputs=[y_hat], name='feature_selector')
 
@@ -143,33 +122,6 @@ class FeatureSelector(BaseModel):
 
     def get_feature_importance_cb(self):
         return FeatureImportanceCallback(self.get_feature_name())
-
-class Variable(layers.Layer):
-
-    def __init__(self, dims, **kwargs):
-        self.dims = dims
-        super(Variable, self).__init__(**kwargs)
-
-    def build(self, input_shape):
-        self.variable = self.add_weight(
-            name='var',
-            shape=(self.dims, 1),
-            dtype=tf.float32,
-            initializer=tf.keras.initializers.Zeros(), trainable=True
-        )
-
-        super(Variable, self).build(input_shape)
-
-    def call(self, inputs, **kwargs):
-        return self.variable
-
-    def get_config(self):
-        config = {
-            'dims': self.dims
-        }
-
-        base_config = super(Variable, self).get_config()
-        return dict(list(base_config) + list(config.items()))
 
 class FeatureImportanceCallback(Callback):
 

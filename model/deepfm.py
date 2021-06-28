@@ -7,7 +7,6 @@ from tensorflow.keras import layers
 from tensorflow.keras import Model
 
 from layers import layer_fn, FM
-from layers import Mlp
 from model.basemodel import BaseModel
 
 class DeepFM(BaseModel):
@@ -57,28 +56,13 @@ class DeepFM(BaseModel):
 
         super(DeepFM, self).build()
 
-        embedding_out = layer_fn.get_embed_output(
-            self.input_dict,
-            sparse_feat_cls_list=self.sparse_feat_cls_list,
-            embedding_init_name=self.embedding_init_name,
-            embedding_init_stddev=self.embedding_init_stddev,
-            embedding_l1_reg=self.embedding_l1_reg,
-            embedding_l2_reg=self.embedding_l2_reg,
-            mask_zero=self.mask_zero,
-            suffix_name='deep'
-        )
+        embedding_out = self._get_sparse_embedding()
+
         dnn_in = layers.Flatten()(embedding_out)
 
-        dnn_in = self.add_dense_input(dnn_in, self.dense_feat_cls_list)
+        dnn_in = self._add_dense_input(dnn_in, self.dense_feat_cls_list)
 
-        dnn_out = Mlp(
-            units=self.hidden_units,
-            dropout_list=self.dropout_list,
-            activation=self.activation,
-            l2_reg_list=self.deep_l2_reg_list,
-            use_bn=self.use_bn,
-            kernel_initializer=self.fc_init
-        )(dnn_in)
+        dnn_out = self._get_mlp_out(dnn_in)
 
         dnn_out = layers.Dense(1)(dnn_out)
 
@@ -98,9 +82,6 @@ class DeepFM(BaseModel):
         )
 
         dnn_logit = layers.Add()([ linear_out, fm_out, dnn_out ])
-        if self.model_type == 'bi_classifier':
-            y_hat = layers.Activation('sigmoid')(dnn_logit)
-        elif self.model_type == 'regression':
-            y_hat = dnn_logit
+        y_hat = self._predict_layer(dnn_logit)
 
         self.model = Model(inputs=self.input_dict, outputs=[y_hat], name='deepfm')

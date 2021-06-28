@@ -8,6 +8,7 @@ from layers.core import Pooling
 from layers.core import AttentionPooling
 from layers.core import Gate
 from layers.core import AddBias
+from layers.core import Variable
 from layers.cross import FM
 from layers.cross import Crossing
 from layers.cross import SecondOrderIntersection

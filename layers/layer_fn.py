@@ -117,8 +117,9 @@ def get_pooling_embed_dict(input_layer_dict,
                            embedding_l1_reg=0.0,
                            embedding_l2_reg=0.0,
                            mask_zero=False,
-                           suffix_name='default',
-                           embedding_matrix=None):
+                           pooling=None,
+                           embedding_matrix=None,
+                           suffix_name='default'):
 
     raw_embedding_dict = get_raw_embed_dict(
         input_layer_dict=input_layer_dict,
@@ -141,7 +142,10 @@ def get_pooling_embed_dict(input_layer_dict,
             continue
         if isinstance(feature_cls, SequenceFeature):
             if feature_cls.pooling in ('mean', 'sum', 'max', 'min'):
-                pooling_output = Pooling(feature_cls.pooling)(raw_embedding_dict[feature_cls.name])
+                if pooling is None:
+                    pooling_output = Pooling(feature_cls.pooling)(raw_embedding_dict[feature_cls.name])
+                else:
+                    pooling_output = Pooling(pooling)(raw_embedding_dict[feature_cls.name])
             elif feature_cls.pooling == 'inner':
                 query = feature_cls.query
                 pooling_output = AttentionPooling()([raw_embedding_dict[query], raw_embedding_dict[feature_cls.name]])
@@ -164,8 +168,9 @@ def get_embed_output(input_layer_dict,
                      embedding_l1_reg=0.0,
                      embedding_l2_reg=0.0,
                      mask_zero=False,
-                     suffix_name='default',
-                     embedding_matrix=None):
+                     pooling=None,
+                     embedding_matrix=None,
+                     suffix_name='default'):
 
     embedding_pooling_dict = get_pooling_embed_dict(
         input_layer_dict=input_layer_dict,
@@ -176,6 +181,7 @@ def get_embed_output(input_layer_dict,
         embedding_l1_reg=embedding_l1_reg,
         embedding_l2_reg=embedding_l2_reg,
         mask_zero=mask_zero,
+        pooling=pooling,
         suffix_name=suffix_name,
         embedding_matrix=embedding_matrix
     )

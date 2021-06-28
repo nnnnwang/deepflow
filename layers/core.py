@@ -6,7 +6,7 @@
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras import backend as K
-from tensorflow.keras.layers import Layer,Dropout,BatchNormalization,Concatenate,LayerNormalization,Dense
+from tensorflow.keras.layers import Layer,Dropout,BatchNormalization,LayerNormalization,Dense
 from tensorflow.keras import activations
 from tensorflow.keras import initializers
 from tensorflow.keras import regularizers
@@ -40,6 +40,7 @@ class Mlp(Layer):
         super(Mlp, self).__init__(**kwargs)
 
     def build(self, input_shape):
+
         if not isinstance(self.units, list):
             raise TypeError('units must be list type')
 
@@ -92,28 +93,33 @@ class Mlp(Layer):
         super(Mlp, self).__init__(input_shape)
 
     def call(self, inputs, training=None, **kwargs):
+
         input = inputs
 
         for index in range(len(self.units)):
-            output = tf.matmul(input, self.kernel[index])
+            if self.dropout_list is not None:
+                output = self.dropout[index](input, training=training)
+            else:
+                output = input
+            output = tf.matmul(output, self.kernel[index])
             if not self.use_bn:
                 output = tf.nn.bias_add(output, self.bias[index])
-            if self.use_gate:
-                output = self.gate[index](output)
             if self.use_bn:
                 output = self.bn[index](output, training=training)
             if self.activation is not None:
                 output = self.activation(output)
-            if self.dropout_list is not None:
-                output = self.dropout[index](output, training=training)
+            if self.use_gate:
+                output = self.gate[index](output)
 
             input = output
         return output
 
     def compute_output_shape(self, input_shape):
+
         return tuple(int(input_shape[0]), self.units[-1])
 
     def get_config(self):
+
         config = {
             'units': self.units,
             'activation': self.activation,
@@ -143,6 +149,7 @@ class Pooling(Layer):
         super(Pooling, self).build(input_shape)
 
     def call(self, inputs, mask=None):
+
         steps_axis = 1
         if mask is not None:
             mask = math_ops.cast(mask, K.floatx())
@@ -213,9 +220,11 @@ class AttentionPooling(Layer):
         super(AttentionPooling, self).build(input_shape)
 
     def compute_mask(self, inputs, mask=None):
+
         return None
 
     def call(self, inputs, mask=None, **kwargs):
+
         query, value = inputs
         embedding_size = query.shape[-1]
         step_size = value.shape[1]
@@ -249,6 +258,7 @@ class AttentionPooling(Layer):
         return tf.reshape(attention_vec, out_shape)
 
     def compute_output_shape(self, input_shape):
+
         value_shape = input_shape[1]
         if not self.keepdims:
             return (int(value_shape[0]), int(value_shape[2]))
@@ -256,6 +266,7 @@ class AttentionPooling(Layer):
             return (int(value_shape[0]), 1, int(value_shape[2]))
 
     def get_config(self):
+
         config = {
             'norm':self.norm,
             'attention_type':self.attention_type,
@@ -268,6 +279,7 @@ class AttentionPooling(Layer):
 class Gate(Layer):
 
     def __init__(self, gate_type='vector_wise', share_gate=False, **kwargs):
+
         self.gate_type = gate_type
         self.share_gate = share_gate
 
@@ -306,6 +318,7 @@ class Gate(Layer):
 
 
     def call(self, inputs, **kwargs):
+
         if len(inputs.shape) == 2:
             inputs = tf.expand_dims(inputs, -1)
         if self.gate_type == 'vector_wise':
@@ -323,6 +336,7 @@ class Gate(Layer):
             return tf.multiply(inputs, activation_val)
 
     def get_config(self):
+
         config = {
             'gate_type': self.gate_type,
             'share_gate': self.share_gate
@@ -333,25 +347,31 @@ class Gate(Layer):
 class AddBias(Layer):
 
     def __init__(self, **kwargs):
+
         super(AddBias, self).__init__(**kwargs)
 
     def build(self, input_shape):
+
         self.bias = self.add_weight(name='bias', shape=(1,),
                                     initializer=initializers.Zeros(), trainable=True)
 
     def call(self, inputs, **kwargs):
+
         return tf.math.reduce_sum(inputs, 1, keepdims=True) + self.bias
 
     def get_config(self):
+
         return super(AddBias, self).get_config()
 
 class PositionInput(Layer):
 
     def __init__(self, dims, **kwargs):
+
         self.dims = dims
         super(PositionInput, self).__init__(**kwargs)
 
     def build(self, input_shape):
+
         self.position = self.add_weight(name='position', shape=(self.dims, ),
                                         dtype=tf.int64, initializer=initializers.Constant(np.arrane(1, 1+self.dims)),
                                         trainable=True)
@@ -363,12 +383,107 @@ class PositionInput(Layer):
         return tf.ones_like(inputs) * self.position
 
     def compute_output_shape(self, input_shape):
+
         return tuple(int(input_shape[0]), self.dims)
 
     def get_config(self):
+
         config = {
             'dims': self.dims
         }
         base_config = super(Gate, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
+
+class Variable(Layer):
+
+    def __init__(self, shape, kernel_initializer='zeros', trainable = True, **kwargs):
+
+        self.shape = shape
+        self.kernel_initializer = initializers.get(get_initializer(kernel_initializer))
+        self.trainable = trainable
+        super(Variable, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+
+        self.variable = self.add_weight(
+            name='var',
+            shape=self.shape,
+            dtype=tf.float32,
+            trainable=self.trainable,
+            initializer=self.kernel_initializer
+        )
+
+        super(Variable, self).build(input_shape)
+
+    def call(self, inputs, **kwargs):
+
+        return self.variable
+
+    def get_config(self):
+
+        config = {
+            'shape': self.shape,
+            'kernel_initializer': self.kernel_initializer,
+            'trainable': self.trainable
+        }
+
+        base_config = super(Variable, self).get_config()
+        return dict(list(base_config) + list(config.items()))
+
+class SelfAttention(Layer):
+
+    def __init__(self, heads, kernel_initializer='glorot_normal', use_ln=False, query_units=16,
+                 dropout_rate=0.0, res_connect=True, **kwargs):
+
+        self.heads = heads
+        self.kernel_initializer = initializers.get(get_initializer(kernel_initializer))
+        self.use_ln = use_ln
+        self.query_units = query_units
+        self.dropout_rate = dropout_rate
+        self.res_connent = res_connect
+        self.suuport_mask = True
+
+        super(SelfAttention, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+
+        if isinstance(input_shape, list):
+            raise ValueError('SelfAttention layer only support one input but got a list')
+
+        if len(input_shape) != 3:
+            raise ValueError('SelfAttention layer\'s input should be 3D but got {}D '.format(len(input_shape)))
+
+        embedding_size = int(input_shape[-1])
+        fields = int(input_shape[1])
+
+        self.query_matrix = self.add_weight(
+            name = 'query_matrix',
+            shape = (embedding_size, self.query_units * self.heads),
+            dtype=K.floatx(),
+            initializers=self.kernel_initializer,
+            trainable=True
+        )
+
+        self.key_matrix = self.add_weight(
+            name='key_matrix',
+            shape=(embedding_size, self.query_units * self.heads),
+            dtype=K.floatx(),
+            initializers=self.kernel_initializer,
+            trainable=True
+        )
+
+        self.value_matrix = self.add_weight(
+            name='value_matrix',
+            shape=(embedding_size, self.query_units * self.heads),
+            dtype=K.floatx(),
+            initializers=self.kernel_initializer,
+            trainable=True
+        )
+
+        if self.use_ln:
+            self.layer_norm = LayerNormalization()
+
+        if self.dropout_rate > 0.0:
+            self.dropout = Dropout(self.dropout_rate)
+
 
